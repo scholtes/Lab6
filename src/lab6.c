@@ -24,10 +24,29 @@ struct cdev *kernel_cdev;
 dev_t dev_no;
 int Major;
 
+char buffer[BUFF_SIZE];
+struct rw_semaphore sema;
 
-ssize_t read(struct file *filp, char *buff, size_t count, loff_t *offp) { return 0; }
 
-ssize_t write(struct file *filp, const char *buff, size_t count, loff_t *offp) { return 0; }
+ssize_t read(struct file *filp, char *buff, size_t count, loff_t *offp) {
+    // Grab the semaphore for readers (lock out writers)
+    down_read(&sema);
+    copy_to_user(buff, buffer, count);
+    // Release the semaphore for readers (writers can now write)
+    up_read(&sema);
+    // Return the number of bytes read, because that's what the
+    // documentation on the man pages says to do
+    return count;
+}
+
+ssize_t write(struct file *filp, const char *buff, size_t count, loff_t *offp) {
+    // Graph the semaphore for THIS writer (lock out all other readers AND writers)
+    down_write(&sema);
+    copy_from_user(buffer, buff, count);
+    // Release the semaphore for this writer (open for reading or writing now)
+    up_write(&sema);
+    return count;
+}
 
 int open(struct inode *inode, struct file *filp) { return 0; }
 
@@ -53,6 +72,10 @@ int init_module(void) {
     Major = MAJOR(dev_no);
     dev = MKDEV(Major, 0);
     ret = cdev_add(kernel_cdev, dev, 1);
+
+    init_rwsem(&sema);
+
+    printk("lab6 major number: %d\n", Major);
 
     return 0;
 }
