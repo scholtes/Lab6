@@ -17,6 +17,7 @@
 #include <linux/fs.h>
 
 #define BUFF_SIZE 100
+#define WAIT_TIME 10 // In seconds
 
 MODULE_LICENSE("GPL");
 
@@ -27,10 +28,14 @@ int Major;
 char buffer[BUFF_SIZE];
 struct rw_semaphore sema;
 
+wait_queue_head_t queue;
+
 
 ssize_t read(struct file *filp, char *buff, size_t count, loff_t *offp) {
     // Grab the semaphore for readers (lock out writers)
     down_read(&sema);
+    // Wait so that we can test for concurrency issues
+    wait_event_timeout(queue, 0, WAIT_TIME*HZ);
     copy_to_user(buff, buffer, count);
     // Release the semaphore for readers (writers can now write)
     up_read(&sema);
@@ -42,6 +47,8 @@ ssize_t read(struct file *filp, char *buff, size_t count, loff_t *offp) {
 ssize_t write(struct file *filp, const char *buff, size_t count, loff_t *offp) {
     // Graph the semaphore for THIS writer (lock out all other readers AND writers)
     down_write(&sema);
+    // Wait so that we can test for concurrency issues
+    wait_event_timeout(queue, 0, WAIT_TIME*HZ);
     copy_from_user(buffer, buff, count);
     // Release the semaphore for this writer (open for reading or writing now)
     up_write(&sema);
@@ -74,6 +81,8 @@ int init_module(void) {
     ret = cdev_add(kernel_cdev, dev, 1);
 
     init_rwsem(&sema);
+
+    init_waitqueue_head(&queue);
 
     printk("lab6 major number: %d\n", Major);
 
